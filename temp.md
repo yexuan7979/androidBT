@@ -29,7 +29,6 @@ static void bta_av_ci_data(tBTA_AV_DATA *p_data)
         //in Dual Handoff mode, get SCB where START is done.
         if(p_scb && (p_scb->chnl == chnl) && (p_scb->started))
         {
-            APPL_TRACE_DEBUG("bta_av_ci_data: p_scb 0x%x", p_scb);
             bta_av_ssm_execute(p_scb, BTA_AV_SRC_DATA_READY_EVT, p_data);
         }
     }
