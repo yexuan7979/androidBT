@@ -2,7 +2,7 @@
 description: 查询媒体音频类设备支持的编码
 ---
 
-# A2dp 编码查询
+# A2dp codec check
 
 ## 说明
 
