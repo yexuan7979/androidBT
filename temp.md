@@ -1,37 +1,24 @@
 ---
-description: temp usage
+description: description of Bluetooth enable procedure.
 ---
 
-# temp
+# Bluetooth enable
 
-insert code
+## Summary
+
+register adapter
+
+init stack
+
+## enable command
+
+user or other apps should call enalbe function via bluetooth adapter.
+
+a. get default adapter
 
 ```text
-/*******************************************************************************
-**
-** Function         bta_av_ci_data
-**
-** Description      forward the BTA_AV_CI_SRC_DATA_READY_EVT to stream state machine
-**
-**
-** Returns          void
-**
-*******************************************************************************/
-static void bta_av_ci_data(tBTA_AV_DATA *p_data)
-{
-    tBTA_AV_SCB *p_scb;
-    int     i;
-    UINT8   chnl = (UINT8)p_data->hdr.layer_specific;
-    for( i=0; i < BTA_AV_NUM_STRS; i++ )
-    {
-        p_scb = bta_av_cb.p_scb[i];
-        //Check if the Stream is in Started state before sending data
-        if(p_scb && (p_scb->chnl == chnl) && (p_scb->started))
-        {
-            bta_av_ssm_execute(p_scb, BTA_AV_SRC_DATA_READY_EVT, p_data);
-        }
-    }
-}
+frameworks/base/core/java/android/bluetooth/BluetoothAdapter.java
+
 ```
 
 
