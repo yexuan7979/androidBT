@@ -10,7 +10,7 @@ android N
 
 A Bluetooth system service communicates with the Bluetooth stack through JNI and with applications through Binder IPC. The system service provides developers with access to various Bluetooth profiles. This diagram shows the general structure of the Bluetooth stack:
 
-![](.gitbook/assets/undefined%20%282%29.png)
+![](.gitbook/assets/undefined%20%283%29.png)
 
 
 
