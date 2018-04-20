@@ -49,7 +49,7 @@ frameworks/base/services/java/com/android/server/SystemServer.java
 
 and in Bluetooth service, create  Bluetooth manager service and react on boot phase to add bluetooth service into system and check if enable or get information.
 
-```text
+```java
 frameworks/base/services/core/java/com/android/server/BluetoothService.java
 class BluetoothService extends SystemService {
     private BluetoothManagerService mBluetoothManagerService;
@@ -81,7 +81,7 @@ class BluetoothService extends SystemService {
 
 publishBinderService: accessible to other services and apps
 
-```text
+```java
     /**
      * Publish the service so it is accessible to other services and apps.
      */
@@ -104,7 +104,7 @@ BluetoothManagerService, from the class name, obviously use to manager the bluet
 
         Bluetooth Handler: handle messages as below.
 
-```text
+```java
     private static final int MESSAGE_ENABLE = 1;
     private static final int MESSAGE_DISABLE = 2;
     private static final int MESSAGE_REGISTER_ADAPTER = 20;
@@ -127,7 +127,7 @@ BluetoothManagerService, from the class name, obviously use to manager the bluet
 
         register receivers and check if set the auto enable flag as below shows.
 
-```text
+```java
 frameworks/base/services/core/java/com/android/server/BluetoothManagerService.java
     BluetoothManagerService(Context context) {
         mHandler = new BluetoothHandler(IoThread.get().getLooper());
@@ -165,7 +165,7 @@ frameworks/base/services/core/java/com/android/server/BluetoothManagerService.ja
 
 and go on handleOnBootPhase in BluetoothManagerService, the annotation is clear.
 
-```text
+```java
     /**
      * Send enable message and set adapter name and address. Called when the boot phase becomes
      * PHASE_SYSTEM_SERVICES_READY.
