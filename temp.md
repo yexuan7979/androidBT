@@ -316,25 +316,117 @@ bind with service connection
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
+and here is the Service Connection definition. after bind OK, onServiceConnected will be called.
 
+{% code-tabs %}
+{% code-tabs-item title="frameworks/base/core/java/android/content/ServiceConnection.java" %}
+```java
+/**
+ * Interface for monitoring the state of an application service.  See
+ * {@link android.app.Service} and
+ * {@link Context#bindService Context.bindService()} for more information.
+ * <p>Like many callbacks from the system, the methods on this class are called
+ * from the main thread of your process.
+ */
+public interface ServiceConnection {
+    /**
+     * Called when a connection to the Service has been established, with
+     * the {@link android.os.IBinder} of the communication channel to the
+     * Service.
+     *
+     * @param name The concrete component name of the service that has
+     * been connected.
+     *
+     * @param service The IBinder of the Service's communication channel,
+     * which you can now make calls on.
+     */
+    void onServiceConnected(ComponentName name, IBinder service);
 
-```text
+    /**
+     * Called when a connection to the Service has been lost.  This typically
+     * happens when the process hosting the service has crashed or been killed.
+     * This does <em>not</em> remove the ServiceConnection itself -- this
+     * binding to the service will remain active, and you will receive a call
+     * to {@link #onServiceConnected} when the Service is next running.
+     *
+     * @param name The concrete component name of the service whose
+     * connection has been lost.
+     */
+    void onServiceDisconnected(ComponentName name);
 
+    /**
+     * Called when the binding to this connection is dead.  This means the
+     * interface will never receive another connection.  The application will
+     * need to unbind and rebind the connection to activate it again.  This may
+     * happen, for example, if the application hosting the service it is bound to
+     * has been updated.
+     *
+     * @param name The concrete component name of the service whose
+     * connection is dead.
+     */
+    default void onBindingDied(ComponentName name) {
+    }
+ja
 ```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
 
+### BluetoothHandler service connected
 
+onServiceConnected send service connected message to Bluetooth Handler. IBluetooth binder get the value here.
 
-```text
+{% code-tabs %}
+{% code-tabs-item title="frameworks/base/services/core/java/com/android/server/BluetoothManagerService.java" %}
+```java
+                case MESSAGE_BLUETOOTH_SERVICE_CONNECTED:
+                {
+                        ........
+                        mBluetooth = IBluetooth.Stub.asInterface(Binder.allowBlocking(service));
 
+                        if (!isNameAndAddressSet()) {
+                            Message getMsg = mHandler.obtainMessage(MESSAGE_GET_NAME_AND_ADDRESS);
+                            mHandler.sendMessage(getMsg);
+                            if (mGetNameAddressOnly) return;
+                        }
+
+                        //Register callback object
+                        try {
+                            mBluetooth.registerCallback(mBluetoothCallback);
+                        } catch (RemoteException re) {
+                            Slog.e(TAG, "Unable to register BluetoothCallback",re);
+                        }
+                        //Inform BluetoothAdapter instances that service is up
+                        sendBluetoothServiceUpCallback();
+
+                        //Do enable request
+                        try {
+                            if (mQuietEnable == false) {
+                                if (!mBluetooth.enable()) {
+                                    Slog.e(TAG,"IBluetooth.enable() returned false");
+                                }
+                        ........
+                }
 ```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
 
+IBluetooth binder register callback for bluetooth state change callback.
 
-
-```text
-
+{% code-tabs %}
+{% code-tabs-item title="frameworks/base/services/core/java/com/android/server/BluetoothManagerService.java" %}
+```java
+private final IBluetoothCallback mBluetoothCallback = new IBluetoothCallback.Stub() {
+        @Override
+        public void onBluetoothStateChange(int prevState, int newState) throws RemoteException  {
+            Message msg = mHandler.obtainMessage(MESSAGE_BLUETOOTH_STATE_CHANGE,prevState,newState);
+            mHandler.sendMessage(msg);
+        }
+    };
 ```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
 
-
+and let's go on with the mBluetooth.enable.
 
 ```text
 
