@@ -426,21 +426,80 @@ private final IBluetoothCallback mBluetoothCallback = new IBluetoothCallback.Stu
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-and let's go on with the mBluetooth.enable.
+and let's go on with the mBluetooth.enable. And make it clear, the mBluetooth is the binder that bind BluetoothManagerService with Bluetooth AdapterService. 
 
-```text
+So, mBluetooth.enable\(\) calls enable function in  AdapterService.java. 
 
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth//src/com/android/bluetooth/btservice/AdapterService.java" %}
+```java
+     public boolean enable() {
+         return enable(false);
+     }
+
+     public synchronized boolean enable(boolean quietMode) {
+         enforceCallingOrSelfPermission(BLUETOOTH_ADMIN_PERM, "Need BLUETOOTH ADMIN permission");
+
+         // Enforce the user restriction for disallowing Bluetooth if it was set.
+         if (mUserManager.hasUserRestriction(UserManager.DISALLOW_BLUETOOTH, UserHandle.SYSTEM)) {
+            debugLog("enable() called when Bluetooth was disallowed");
+            return false;
+         }
+
+         debugLog("enable() - Enable called with quiet mode status =  " + mQuietmode);
+         mQuietmode = quietMode;
+         Message m = mAdapterStateMachine.obtainMessage(AdapterState.BLE_TURN_ON);
+         mAdapterStateMachine.sendMessage(m);
+         mBluetoothStartTime = System.currentTimeMillis();
+         return true;
+     }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+By the way, mService in BluetoothAdapter.java and mBluetooth in BluetoothManagerService.java is the same object. And AdapterService is created as BluetoothManagerService do bind. Below is the bindService description from Android developler.
+
+```coffeescript
+bindService
+
+boolean bindService (Intent service, 
+                ServiceConnection conn, 
+                int flags)
+Connect to an application service, creating it if needed.
+
+This defines a dependency between your application and the service.
+The given conn will receive the service object when it is created and be told if it dies and restarts.
+The service will be considered required by the system only for as long as the calling context exists.
+For example, if this Context is an Activity that is stopped, the service will not be required to continue running until the Activity is resumed.
 ```
 
+### AdapterState enable
 
+And here process the adapter state machine.
 
-```text
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+    private class OffState extends State {
+        ........
+        @Override
+        public boolean processMessage(Message msg) {
+            ........
+            debugLog("Current state: OFF, message: " + msg.what);
 
+            switch(msg.what) {
+               case BLE_TURN_ON:
+                   notifyAdapterStateChange(BluetoothAdapter.STATE_BLE_TURNING_ON);
+                   mPendingCommandState.setBleTurningOn(true);
+                   transitionTo(mPendingCommandState);
+                   sendMessageDelayed(BLE_START_TIMEOUT, BLE_START_TIMEOUT_DELAY);
+                   adapterService.BleOnProcessStart();
+                   break;
+               .........
+    }
 ```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
 
 
-
-```text
-
-```
 
