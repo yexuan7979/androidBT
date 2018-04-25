@@ -586,5 +586,74 @@ As Gatt service started, notifyProfileServiceStateChanged will call back to adap
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
+### Stack Enable
+
+enableNative routes to JNI bt service.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/jni/com\_android\_bluetooth\_btservice\_AdapterService.cpp" %}
+```cpp
+static jboolean enableNative(JNIEnv* env, jobject obj, jboolean isGuest) {
+    ALOGV("%s:",__FUNCTION__);
+
+    jboolean result = JNI_FALSE;
+    if (!sBluetoothInterface) return result;
+    int ret = sBluetoothInterface->enable(isGuest == JNI_TRUE ? 1 : 0);
+    result = (ret == BT_STATUS_SUCCESS || ret == BT_STATUS_DONE) ? JNI_TRUE : JNI_FALSE;
+    return result;
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+sBluetoothInterface is init when loading JNI, which was called in AdapterService static variables. And sBluetoothInterface is the Bluetooth interface in stack.
+
+Mark the code for getting bluetooth.default.so.
+
+{% code-tabs %}
+{% code-tabs-item title="hardware/libhardware/include/hardware/bluetooth.h" %}
+```c
+#define BT_HARDWARE_MODULE_ID "bluetooth"
+#define BT_STACK_MODULE_ID "bluetooth"
+#define BT_STACK_TEST_MODULE_ID "bluetooth_test"
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/jni/com\_android\_bluetooth\_btservice\_AdapterService.cpp" %}
+```cpp
+static void classInitNative(JNIEnv* env, jclass clazz) {
+    int err;
+    hw_module_t* module;
+    ......
+    char value[PROPERTY_VALUE_MAX];
+    property_get("bluetooth.mock_stack", value, "");
+
+    const char *id = (strcmp(value, "1")? BT_STACK_MODULE_ID : BT_STACK_TEST_MODULE_ID);
+
+    err = hw_get_module(id, (hw_module_t const**)&module);
+
+    if (err == 0) {
+        hw_device_t* abstraction;
+        err = module->methods->open(module, id, &abstraction);
+        if (err == 0) {
+            bluetooth_module_t* btStack = (bluetooth_module_t *)abstraction;
+            sBluetoothInterface = btStack->get_bluetooth_interface();
+        } else {
+           ALOGE("Error while opening Bluetooth library");
+        }
+    } else {
+        ALOGE("No Bluetooth Library found");
+    }
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+And go on with the stack enable.
+
+
+
 
 
