@@ -651,9 +651,117 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-And go on with the stack enable.
+And go on with the stack enable. 
 
+{% code-tabs %}
+{% code-tabs-item title="system/bt/btif/src/bluetooth.cc" %}
+```cpp
+static int enable(bool start_restricted) {
+  LOG_INFO(LOG_TAG, "%s: start restricted = %d", __func__, start_restricted);
 
+  restricted_mode = start_restricted;
+
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
+
+  stack_manager_get_interface()->start_up_stack_async();
+  return BT_STATUS_SUCCESS;
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+interface\_ready is to check if hal callback is ready, which is initiated when create AdapterService.
+
+stack\_manager\_get\_interface init stack manager thread, which is used to manager start up and shut down asynchronous messages.
+
+init\_stack: init osi, utils and config module.
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/btif/src/bluetooth.cc" %}
+```cpp
+static int init(bt_callbacks_t* callbacks) {
+  LOG_INFO(LOG_TAG, "%s", __func__);
+
+  if (interface_ready()) return BT_STATUS_DONE;
+
+#ifdef BLUEDROID_DEBUG
+  allocation_tracker_init();
+#endif
+
+  bt_hal_cbacks = callbacks;
+  stack_manager_get_interface()->init_stack();
+  btif_debug_init();
+  return BT_STATUS_SUCCESS;
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+start\_up\_stack\_async, start up config module and enable bte main.
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/btif/src/stack\_manager.cc" %}
+```cpp
+static void start_up_stack_async(void) {
+  thread_post(management_thread, event_start_up_stack, NULL);
+}
+
+// Synchronous function to start up the stack
+static void event_start_up_stack(UNUSED_ATTR void* context) {
+  ......
+  // Include this for now to put btif config into a shutdown-able state
+  module_start_up(get_module(BTIF_CONFIG_MODULE));
+  bte_main_enable();
+
+  if (future_await(local_hack_future) != FUTURE_SUCCESS) {
+    LOG_ERROR(LOG_TAG, "%s failed to start up the stack", __func__);
+    stack_is_running = true;  // So stack shutdown actually happens
+    event_shut_down_stack(NULL);
+    return;
+  }
+
+  stack_is_running = true;
+  LOG_INFO(LOG_TAG, "%s finished", __func__);
+  btif_thread_post(event_signal_stack_up, NULL);
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+bte\_main\_enable, start btsnoop and hci module, and start up btu.
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/main/bte\_main.cc" %}
+```cpp
+/******************************************************************************
+ *
+ * Function         bte_main_enable
+ *
+ * Description      BTE MAIN API - Creates all the BTE tasks. Should be called
+ *                  part of the Bluetooth stack enable sequence
+ *
+ * Returns          None
+ *
+ *****************************************************************************/
+void bte_main_enable() {
+  APPL_TRACE_DEBUG("%s", __func__);
+
+  module_start_up(get_module(BTSNOOP_MODULE));
+  if (!module_start_up(get_module(HCI_MODULE))) {
+    LOG_ERROR(LOG_TAG,
+    "%s HCI_MODULE failed to start, Killing the bluetooth process", __func__);
+    /* Killing the process to force a restart as part of fault tolerance */
+    kill(getpid(), SIGKILL);
+  }
+
+  BTU_StartUp();
+}
+
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+BTU\_StartUp
 
 
 
