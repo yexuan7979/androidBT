@@ -1,4 +1,4 @@
-# title
+# Bluetooth Init
 
 Description of the Bluetooth init procedure in android O.
 
