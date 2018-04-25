@@ -431,7 +431,7 @@ and let's go on with the mBluetooth.enable. And make it clear, the mBluetooth is
 So, mBluetooth.enable\(\) calls enable function in  AdapterService.java. 
 
 {% code-tabs %}
-{% code-tabs-item title="packages/apps/Bluetooth//src/com/android/bluetooth/btservice/AdapterService.java" %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterService.java" %}
 ```java
      public boolean enable() {
          return enable(false);
@@ -475,7 +475,9 @@ For example, if this Context is an Activity that is stopped, the service will no
 
 ### AdapterState enable
 
-And here process the adapter state machine.
+And here process the adapter state machine. notifyAdapterStateChange  will send the BLE turning on state to BluetoothManagerService, and broadcast to the registers via BluetoothManagerService.
+
+Then set a 2 seconds timer for gatt service start, as BleOnProcessStart is  to start gatt service mainly.
 
 {% code-tabs %}
 {% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
@@ -497,6 +499,89 @@ And here process the adapter state machine.
                    break;
                .........
     }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+Here is the implementation of BleOnPrecessStart, init config and jni callback, and start gatt service.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterService.java" %}
+```java
+    void BleOnProcessStart() {
+        debugLog("BleOnProcessStart()");
+
+        if (getResources().getBoolean(
+                R.bool.config_bluetooth_reload_supported_profiles_when_enabled)) {
+            Config.init(getApplicationContext());
+        }
+
+        Class[] supportedProfileServices = Config.getSupportedProfiles();
+        //Initialize data objects
+        for (int i=0; i < supportedProfileServices.length;i++) {
+            mProfileServicesState.put(supportedProfileServices[i].getName(),BluetoothAdapter.STATE_OFF);
+        }
+
+        debugLog("BleOnProcessStart() - Make Bond State Machine");
+
+        mJniCallbacks.init(mBondStateMachine,mRemoteDevices);
+
+        try {
+            mBatteryStats.noteResetBleScan();
+        } catch (RemoteException e) {
+            // Ignore.
+        }
+
+        //Start Gatt service
+        setGattProfileServiceState(supportedProfileServices,BluetoothAdapter.STATE_ON);
+    }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+start Gatt service in ProfileService,  start\(\) will route to GattService.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/ProfileService.java" %}
+```java
+    private void doStart(Intent intent) {
+        //Start service
+        if (mAdapter == null) {
+            Log.e(mName, "Error starting profile. BluetoothAdapter is null");
+        } else {
+            if (DBG) log("start()");
+            mStartError = !start();
+            if (!mStartError) {
+                Log.d(mName, " profile started successfully");
+                notifyProfileServiceStateChanged(BluetoothAdapter.STATE_ON);
+            } else {
+                Log.e(mName, "Error starting profile. BluetoothAdapter is null");
+            }
+        }
+    }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+As Gatt service started, notifyProfileServiceStateChanged will call back to adapter state machine. And hence, cancel the BLE start timer, enableNative to start stack, and start a 12 seconds' enable timeout.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+                case BLE_STARTED:
+                    //Remove start timeout
+                    removeMessages(BLE_START_TIMEOUT);
+
+                    //Enable
+                    boolean isGuest = UserManager.get(mAdapterService).isGuestUser();
+                    if (!adapterService.enableNative(isGuest)) {
+                        errorLog("Error while turning Bluetooth on");
+                        notifyAdapterStateChange(BluetoothAdapter.STATE_OFF);
+                        transitionTo(mOffState);
+                    } else {
+                        sendMessageDelayed(ENABLE_TIMEOUT, ENABLE_TIMEOUT_DELAY);
+                    }
+                    break;
 ```
 {% endcode-tabs-item %}
 {% endcode-tabs %}
