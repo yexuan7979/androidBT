@@ -956,5 +956,5 @@ void bta_sys_hw_btm_cback(tBTM_DEV_STATUS status) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-
+callback to jjhiguhiughiuuiuhifgfh
 
