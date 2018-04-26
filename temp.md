@@ -763,5 +763,198 @@ void bte_main_enable() {
 
 BTU\_StartUp
 
+create thead bt\_workqueue\_thread, and post start up task to it.
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/stack/btu/btu\_init.cc" %}
+```cpp
+/*****************************************************************************
+ *
+ * Function         BTU_StartUp
+ *
+ * Description      Initializes the BTU control block.
+ *
+ *                  NOTE: Must be called before creating any tasks
+ *                      (RPC, BTU, HCIT, APPL, etc.)
+ *
+ * Returns          void
+ *
+ *****************************************************************************/
+void BTU_StartUp(void) {
+  btu_trace_level = HCI_INITIAL_TRACE_LEVEL;
+
+  bt_workqueue_thread = thread_new(BT_WORKQUEUE_NAME);
+  if (bt_workqueue_thread == NULL) goto error_exit;
+
+  thread_set_rt_priority(bt_workqueue_thread, BTU_TASK_RT_PRIORITY);
+
+  // Continue startup on bt workqueue thread.
+  thread_post(bt_workqueue_thread, btu_task_start_up, NULL);
+  return;
+
+error_exit:;
+  LOG_ERROR(LOG_TAG, "%s Unable to allocate resources for bt_workqueue",
+            __func__);
+  BTU_ShutDown();
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+btu\_task\_start\_up
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/stack/btu/btu\_task.cc" %}
+```cpp
+void btu_task_start_up(UNUSED_ATTR void* context) {
+  LOG(INFO) << "Bluetooth chip preload is complete";
+
+  /* Initialize the mandatory core stack control blocks
+     (BTU, BTM, L2CAP, and SDP)
+   */
+  btu_init_core();
+
+  /* Initialize any optional stack components */
+  BTE_InitStack();
+
+  bta_sys_init();
+
+  /* Initialise platform trace levels at this point as BTE_InitStack() and
+   * bta_sys_init()
+   * reset the control blocks and preset the trace level with
+   * XXX_INITIAL_TRACE_LEVEL
+   */
+  module_init(get_module(BTE_LOGMSG_MODULE));
+  // Inform the bt jni thread initialization is ok.
+  btif_transfer_context(btif_init_ok, 0, NULL, 0, NULL);
+  ........
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+btif\_init\_ok
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/btif/src/btif\_core.cc" %}
+```cpp
+void btif_init_ok(UNUSED_ATTR uint16_t event, UNUSED_ATTR char* p_param) {
+  BTIF_TRACE_DEBUG("btif_task: received trigger stack init event");
+  btif_dm_load_ble_local_keys();
+  BTA_EnableBluetooth(bte_dm_evt);
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+bta\_dm\_enable
+
+```cpp
+/*******************************************************************************
+ *
+ * Function         bta_dm_enable
+ *
+ * Description      Initialises the BT device manager
+ *
+ *
+ * Returns          void
+ *
+ ******************************************************************************/
+void bta_dm_enable(tBTA_DM_MSG* p_data) {
+  tBTA_DM_ENABLE enable_event;
+
+  /* if already in use, return an error */
+  if (bta_dm_cb.is_bta_dm_active == true) {
+    APPL_TRACE_WARNING("%s Device already started by another application",
+                       __func__);
+    memset(&enable_event, 0, sizeof(tBTA_DM_ENABLE));
+    enable_event.status = BTA_FAILURE;
+    if (p_data->enable.p_sec_cback != NULL)
+      p_data->enable.p_sec_cback(BTA_DM_ENABLE_EVT,
+                                 (tBTA_DM_SEC*)&enable_event);
+    return;
+  }
+
+  /* first, register our callback to SYS HW manager */
+  bta_sys_hw_register(BTA_SYS_HW_BLUETOOTH, bta_dm_sys_hw_cback);
+
+  /* make sure security callback is saved - if no callback, do not erase the
+  previous one,
+  it could be an error recovery mechanism */
+  if (p_data->enable.p_sec_cback != NULL)
+    bta_dm_cb.p_sec_cback = p_data->enable.p_sec_cback;
+  /* notify BTA DM is now active */
+  bta_dm_cb.is_bta_dm_active = true;
+
+  /* send a message to BTA SYS */
+  tBTA_SYS_HW_MSG* sys_enable_event =
+      (tBTA_SYS_HW_MSG*)osi_malloc(sizeof(tBTA_SYS_HW_MSG));
+  sys_enable_event->hdr.event = BTA_SYS_API_ENABLE_EVT;
+  sys_enable_event->hw_module = BTA_SYS_HW_BLUETOOTH;
+
+  bta_sys_sendmsg(sys_enable_event);
+}
+```
+
+and go on with API enable event
+
+bta\_sys\_hw\_api\_enable, and bta\_sys\_hw\_evt\_enabled\(BTM\_DeviceReset\).
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/stack/btm/btm\_devctl.cc" %}
+```cpp
+void BTM_DeviceReset(UNUSED_ATTR tBTM_CMPL_CB* p_cb) {
+  /* Flush all ACL connections */
+  btm_acl_device_down();
+
+  /* Clear the callback, so application would not hang on reset */
+  btm_db_reset();
+
+  module_start_up_callbacked_wrapper(get_module(CONTROLLER_MODULE),
+                                     bt_workqueue_thread, reset_complete);
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+start up controller molule, and callback to reset \_complete.  and reset complete will call back to bta\_sys\_hw\_btm\_cback with BTM\_DEV\_STATUS\_UP event.
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/bta/sys/bta\_sys\_main.cc" %}
+```cpp
+/******************************************************
+*************************
+ *
+ * Function         bta_sys_hw_btm_cback
+ *
+ * Description     This function is registered by BTA SYS to BTM in order to get
+ *                 status notifications
+ *
+ *
+ * Returns
+ *
+ ******************************************************************************/
+void bta_sys_hw_btm_cback(tBTM_DEV_STATUS status) {
+  tBTA_SYS_HW_MSG* sys_event =
+      (tBTA_SYS_HW_MSG*)osi_malloc(sizeof(tBTA_SYS_HW_MSG));
+
+  APPL_TRACE_DEBUG("%s was called with parameter: %i", __func__, status);
+
+  /* send a message to BTA SYS */
+  if (status == BTM_DEV_STATUS_UP) {
+    sys_event->hdr.event = BTA_SYS_EVT_STACK_ENABLED_EVT;
+  } else if (status == BTM_DEV_STATUS_DOWN) {
+    sys_event->hdr.event = BTA_SYS_ERROR_EVT;
+  } else {
+    /* BTM_DEV_STATUS_CMD_TOUT is ignored for now. */
+    osi_free_and_reset((void**)&sys_event);
+  }
+
+  if (sys_event) bta_sys_sendmsg(sys_event);
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
 
 
