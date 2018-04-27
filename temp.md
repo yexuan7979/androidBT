@@ -588,6 +588,8 @@ As Gatt service started, notifyProfileServiceStateChanged will call back to adap
 
 ### Stack Enable
 
+#### enableNative
+
 enableNative routes to JNI bt service.
 
 {% code-tabs %}
@@ -651,6 +653,8 @@ static void classInitNative(JNIEnv* env, jclass clazz) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
+#### stack enable
+
 And go on with the stack enable. 
 
 {% code-tabs %}
@@ -697,6 +701,8 @@ static int init(bt_callbacks_t* callbacks) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
+#### stack manager
+
 start\_up\_stack\_async, start up config module and enable bte main.
 
 {% code-tabs %}
@@ -727,6 +733,8 @@ static void event_start_up_stack(UNUSED_ATTR void* context) {
 ```
 {% endcode-tabs-item %}
 {% endcode-tabs %}
+
+#### bte main
 
 bte\_main\_enable, start btsnoop and hci module, and start up btu.
 
@@ -761,7 +769,7 @@ void bte_main_enable() {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-BTU\_StartUp
+#### BTU start up
 
 create thead bt\_workqueue\_thread, and post start up task to it.
 
@@ -801,6 +809,8 @@ error_exit:;
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
+#### btu task
+
 btu\_task\_start\_up
 
 {% code-tabs %}
@@ -833,6 +843,8 @@ void btu_task_start_up(UNUSED_ATTR void* context) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
+#### btif core
+
 btif\_init\_ok
 
 {% code-tabs %}
@@ -846,6 +858,8 @@ void btif_init_ok(UNUSED_ATTR uint16_t event, UNUSED_ATTR char* p_param) {
 ```
 {% endcode-tabs-item %}
 {% endcode-tabs %}
+
+#### bta dm
 
 bta\_dm\_enable
 
@@ -895,6 +909,8 @@ void bta_dm_enable(tBTA_DM_MSG* p_data) {
   bta_sys_sendmsg(sys_enable_event);
 }
 ```
+
+#### controller interoperation
 
 and go on with API enable event
 
@@ -956,19 +972,15 @@ void bta_sys_hw_btm_cback(tBTM_DEV_STATUS status) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-callback to bta\_dm\_sys\_hw\_cback
+callback to bta\_dm\_sys\_hw\_cback with event BTA\_SYS\_HW\_ON\_EVT
+
+set device class mobile phone, load ble keys, set link supervision timeout, write page timout, read local name......
 
 {% code-tabs %}
 {% code-tabs-item title="system/bt./bta/dm/bta\_dm\_act.cc" %}
 ```cpp
 ......
 } else if (status == BTA_SYS_HW_ON_EVT) {
-    /* FIXME: We should not unregister as the SYS shall invoke this callback on
-     * a H/W error.
-     * We need to revisit when this platform has more than one BLuetooth H/W
-     * chip
-     */
-    // bta_sys_hw_unregister( BTA_SYS_HW_BLUETOOTH);
 
     /* save security callback */
     temp_cback = bta_dm_cb.p_sec_cback;
@@ -999,15 +1011,7 @@ callback to bta\_dm\_sys\_hw\_cback
     BTM_SetDefaultLinkPolicy(bta_dm_cb.cur_policy);
     BTM_RegBusyLevelNotif(bta_dm_bl_change_cback, NULL,
                           BTM_BL_UPDATE_MASK | BTM_BL_ROLE_CHG_MASK);
-
-#if (BLE_VND_INCLUDED == TRUE)
-    BTM_BleReadControllerFeatures(bta_dm_ctrl_features_rd_cmpl_cback);
-#else
-    /* If VSC multi adv commands are available, advertising will be initialized
-     * when capabilities are read. If they are not avaliable, initialize
-     * advertising here */
-    btm_ble_adv_init();
-#endif
+    ......
 
     /* Earlier, we used to invoke BTM_ReadLocalAddr which was just copying the
        bd_addr
@@ -1035,4 +1039,143 @@ callback to bta\_dm\_sys\_hw\_cback
 ```
 {% endcode-tabs-item %}
 {% endcode-tabs %}
+
+local name call back to dm upstream event handling.
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/./btif/src/btif\_dm.cc" %}
+```cpp
+    case BTA_DM_ENABLE_EVT: {
+      BD_NAME bdname;
+      bt_status_t status;
+      bt_property_t prop;
+      prop.type = BT_PROPERTY_BDNAME;
+      prop.len = BD_NAME_LEN + 1;
+      prop.val = (void*)bdname;
+
+      status = btif_storage_get_adapter_property(&prop);
+      if (status == BT_STATUS_SUCCESS) {
+        /* A name exists in the storage. Make this the device name */
+        BTA_DmSetDeviceName((char*)prop.val);
+      } else {
+        /* Storage does not have a name yet.
+         * Use the default name and write it to the chip
+         */
+        BTA_DmSetDeviceName(btif_get_default_local_name());
+      }
+
+      /* Enable local privacy */
+      BTA_DmBleConfigLocalPrivacy(BLE_LOCAL_PRIVACY_ENABLED);
+
+      /* for each of the enabled services in the mask, trigger the profile
+       * enable */
+      service_mask = btif_get_enabled_services_mask();
+      for (i = 0; i <= BTA_MAX_SERVICE_ID; i++) {
+        if (service_mask &
+            (tBTA_SERVICE_MASK)(BTA_SERVICE_ID_TO_SERVICE_MASK(i))) {
+          btif_in_execute_service_request(i, true);
+        }
+      }
+      /* clear control blocks */
+      memset(&pairing_cb, 0, sizeof(btif_dm_pairing_cb_t));
+      pairing_cb.bond_type = BOND_TYPE_PERSISTENT;
+
+      /* This function will also trigger the adapter_properties_cb
+      ** and bonded_devices_info_cb
+      */
+      btif_storage_load_bonded_devices();
+
+      btif_enable_bluetooth_evt(p_data->enable.status);
+    } break;
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+#### stack manager
+
+let's go back to the stack manager to post the event\_signal\_stack\_up event in event\_start\_up\_stack
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt/btif/src/stack\_manager.cc" %}
+```cpp
+static void event_signal_stack_up(UNUSED_ATTR void* context) {
+  // Notify BTIF connect queue that we've brought up the stack. It's
+  // now time to dispatch all the pending profile connect requests.
+  btif_queue_connect_next();
+  HAL_CBACK(bt_hal_cbacks, adapter_state_changed_cb, BT_STATE_ON);
+}
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+### Adapter Enable Ready
+
+callback to Adapter via JNI.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+    void stateChangeCallback(int status) {
+        if (status == AbstractionLayer.BT_STATE_OFF) {
+            sendMessage(DISABLED);
+
+        } else if (status == AbstractionLayer.BT_STATE_ON) {
+            // We should have got the property change for adapter and remote devices.
+            sendMessage(ENABLED_READY);
+
+        } else {
+            errorLog("Incorrect status in stateChangeCallback");
+        }
+    }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+### Adapter BLE on
+
+adapter state will transit to BLE on state after recevie enable ready event, and send broadcast to manager service.
+
+{% code-tabs %}
+{% code-tabs-item title="frameworks/base/services//core/java/com/android/server/BluetoothManagerService.java" %}
+```java
+} else if (!intermediate_off) {
+                // connect to GattService
+                if (DBG) Slog.d(TAG, "Bluetooth is in LE only mode");
+                if (mBluetoothGatt != null) {
+                    if (DBG) Slog.d(TAG, "Calling BluetoothGattServiceUp");
+                    onBluetoothGattServiceUp();
+                } else {
+                    if (DBG) Slog.d(TAG, "Binding Bluetooth GATT service");
+                    if (mContext.getPackageManager().hasSystemFeature(
+                                                    PackageManager.FEATURE_BLUETOOTH_LE)) {
+                        Intent i = new Intent(IBluetoothGatt.class.getName());
+                        doBind(i, mConnection, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT, UserHandle.CURRENT);
+                    }
+                }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+### Adapter Turning on
+
+gatt service up will trigger user turn on event to adapter state machine. And adapter state change to turning on state.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+               case USER_TURN_ON:
+                   notifyAdapterStateChange(BluetoothAdapter.STATE_TURNING_ON);
+                   adapterProperties.clearDisableFlag();
+                   mPendingCommandState.setTurningOn(true);
+                   transitionTo(mPendingCommandState);
+                   sendMessageDelayed(BREDR_START_TIMEOUT, BREDR_START_TIMEOUT_DELAY);
+                   adapterService.startCoreServices();
+                   break;
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+#### startCoreServices
+
+
 
