@@ -956,5 +956,83 @@ void bta_sys_hw_btm_cback(tBTM_DEV_STATUS status) {
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-callback to jjhiguhiughiuuiuhifgfh
+callback to bta\_dm\_sys\_hw\_cback
+
+{% code-tabs %}
+{% code-tabs-item title="system/bt./bta/dm/bta\_dm\_act.cc" %}
+```cpp
+......
+} else if (status == BTA_SYS_HW_ON_EVT) {
+    /* FIXME: We should not unregister as the SYS shall invoke this callback on
+     * a H/W error.
+     * We need to revisit when this platform has more than one BLuetooth H/W
+     * chip
+     */
+    // bta_sys_hw_unregister( BTA_SYS_HW_BLUETOOTH);
+
+    /* save security callback */
+    temp_cback = bta_dm_cb.p_sec_cback;
+    /* make sure the control block is properly initialized */
+    bta_dm_init_cb();
+    .......
+
+    memcpy(dev_class, p_bta_dm_cfg->dev_class, sizeof(dev_class));
+    BTM_SetDeviceClass(dev_class);
+
+    /* load BLE local information: ID keys, ER if available */
+    bta_dm_co_ble_load_local_keys(&key_mask, er, &id_key);
+
+    if (key_mask & BTA_BLE_LOCAL_KEY_TYPE_ER) {
+      BTM_BleLoadLocalKeys(BTA_BLE_LOCAL_KEY_TYPE_ER,
+                           (tBTM_BLE_LOCAL_KEYS*)&er);
+    }
+    if (key_mask & BTA_BLE_LOCAL_KEY_TYPE_ID) {
+      BTM_BleLoadLocalKeys(BTA_BLE_LOCAL_KEY_TYPE_ID,
+                           (tBTM_BLE_LOCAL_KEYS*)&id_key);
+    }
+    bta_dm_search_cb.conn_id = BTA_GATT_INVALID_CONN_ID;
+
+    BTM_SecRegister((tBTM_APPL_INFO*)&bta_security);
+    BTM_SetDefaultLinkSuperTout(p_bta_dm_cfg->link_timeout);
+    BTM_WritePageTimeout(p_bta_dm_cfg->page_timeout);
+    bta_dm_cb.cur_policy = p_bta_dm_cfg->policy_settings;
+    BTM_SetDefaultLinkPolicy(bta_dm_cb.cur_policy);
+    BTM_RegBusyLevelNotif(bta_dm_bl_change_cback, NULL,
+                          BTM_BL_UPDATE_MASK | BTM_BL_ROLE_CHG_MASK);
+
+#if (BLE_VND_INCLUDED == TRUE)
+    BTM_BleReadControllerFeatures(bta_dm_ctrl_features_rd_cmpl_cback);
+#else
+    /* If VSC multi adv commands are available, advertising will be initialized
+     * when capabilities are read. If they are not avaliable, initialize
+     * advertising here */
+    btm_ble_adv_init();
+#endif
+
+    /* Earlier, we used to invoke BTM_ReadLocalAddr which was just copying the
+       bd_addr
+       from the control block and invoking the callback which was sending the
+       DM_ENABLE_EVT.
+       But then we have a few HCI commands being invoked above which were still
+       in progress
+       when the ENABLE_EVT was sent. So modified this to fetch the local name
+       which forces
+       the DM_ENABLE_EVT to be sent only after all the init steps are complete
+       */
+    BTM_ReadLocalDeviceNameFromController(
+        (tBTM_CMPL_CB*)bta_dm_local_name_cback);
+
+    bta_sys_rm_register((tBTA_SYS_CONN_CBACK*)bta_dm_rm_cback);
+
+    /* initialize bluetooth low power manager */
+    bta_dm_init_pm();
+
+    bta_sys_policy_register((tBTA_SYS_CONN_CBACK*)bta_dm_policy_cback);
+
+    bta_dm_gattc_register();
+
+  }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
 
