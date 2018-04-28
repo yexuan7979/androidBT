@@ -10,6 +10,12 @@ register adapter
 
 init stack
 
+start gatt service
+
+start stack
+
+start supported service
+
 ## enable
 
 user or other apps should call enalbe function via bluetooth adapter.
@@ -1158,24 +1164,185 @@ adapter state will transit to BLE on state after recevie enable ready event, and
 
 ### Adapter Turning on
 
-gatt service up will trigger user turn on event to adapter state machine. And adapter state change to turning on state.
+gatt service up will trigger user turn on event to adapter state machine. And adapter state change to turning on state. \(The pending state in the **latest Android O** code is removed, and here begin to check with the latest code. The implementation is similar.\)
 
 {% code-tabs %}
 {% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
 ```java
-               case USER_TURN_ON:
-                   notifyAdapterStateChange(BluetoothAdapter.STATE_TURNING_ON);
-                   adapterProperties.clearDisableFlag();
-                   mPendingCommandState.setTurningOn(true);
-                   transitionTo(mPendingCommandState);
-                   sendMessageDelayed(BREDR_START_TIMEOUT, BREDR_START_TIMEOUT_DELAY);
-                   adapterService.startCoreServices();
-                   break;
+private class BleOnState extends BaseAdapterState {
+
+        @Override
+        int getStateValue() {
+            return BluetoothAdapter.STATE_BLE_ON;
+        }
+
+        @Override
+        public boolean processMessage(Message msg) {
+            switch (msg.what) {
+                case USER_TURN_ON:
+                    transitionTo(mTurningOnState);
+                    break;
+        ........
 ```
 {% endcode-tabs-item %}
 {% endcode-tabs %}
 
-#### startCoreServices
+and when enter mTurningOnState, we begin to start other services. And a 4 seconds' timer is started.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+    private class TurningOnState extends BaseAdapterState {
+
+        @Override
+        int getStateValue() {
+            return BluetoothAdapter.STATE_TURNING_ON;
+        }
+
+        @Override
+        public void enter() {
+            super.enter();
+            sendMessageDelayed(BREDR_START_TIMEOUT, BREDR_START_TIMEOUT_DELAY);
+            mAdapterService.startProfileServices();
+        }
+        ........
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+#### startProfileServices
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterService.java" %}
+```java
+    void startProfileServices() {
+        debugLog("startCoreServices()");
+        Class[] supportedProfileServices = Config.getSupportedProfiles();
+        if (supportedProfileServices.length == 1 && GattService.class.getSimpleName()
+                .equals(supportedProfileServices[0].getSimpleName())) {
+            mAdapterProperties.onBluetoothReady();
+            updateUuids();
+            setBluetoothClassFromConfig();
+            mAdapterStateMachine.sendMessage(AdapterState.BREDR_STARTED);
+        } else {
+            setAllProfileServiceStates(supportedProfileServices, BluetoothAdapter.STATE_ON);
+        }
+    }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+each service started will send service state changed broadcast.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/ProfileService.java" %}
+```java
+    private void doStart() {
+        ........
+        getApplicationContext().registerReceiver(mUserSwitchedReceiver, filter);
+        int currentUserId = ActivityManager.getCurrentUser();
+        setCurrentUser(currentUserId);
+        UserManager userManager = UserManager.get(getApplicationContext());
+        if (userManager.isUserUnlocked(currentUserId)) {
+            setUserUnlocked(currentUserId);
+        }
+        mProfileStarted = start();
+        if (!mProfileStarted) {
+            Log.e(mName, "Error starting profile. start() returned false.");
+            return;
+        }
+        mAdapterService.onProfileServiceStateChanged(this, BluetoothAdapter.STATE_ON);
+    }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+and when all the supported services are started, adapter state machine will receive the BREDR started message.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterService.java" %}
+```java
+        private void processProfileServiceStateChanged(ProfileService profile, int state) {
+            switch (state) {
+                case BluetoothAdapter.STATE_ON:
+                    if (!mRegisteredProfiles.contains(profile)) {
+                        Log.e(TAG, profile.getName() + " not registered (STATE_ON).");
+                        return;
+                    }
+                    if (mRunningProfiles.contains(profile)) {
+                        Log.e(TAG, profile.getName() + " already running.");
+                        return;
+                    }
+                    mRunningProfiles.add(profile);
+                    if (GattService.class.getSimpleName().equals(profile.getName())) {
+                        enableNativeWithGuestFlag();
+                    } else if (mRegisteredProfiles.size() == Config.getSupportedProfiles().length
+                            && mRegisteredProfiles.size() == mRunningProfiles.size()) {
+                        mAdapterProperties.onBluetoothReady();
+                        updateUuids();
+                        setBluetoothClassFromConfig();
+                        mAdapterStateMachine.sendMessage(AdapterState.BREDR_STARTED);
+                    }
+                    break;
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+and when BREDR started message received, adapter state machine will transit to on state and send the broadcast to the register users. By the way, the  BREDR\_START\_TIMEOUT timer is removed when transit to on state.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+    private class TurningOnState extends BaseAdapterState {
+        ........
+        @Override
+        public void exit() {
+            removeMessages(BREDR_START_TIMEOUT);
+            super.exit();
+        }
+
+        @Override
+        public boolean processMessage(Message msg) {
+            switch (msg.what) {
+                case BREDR_STARTED:
+                    transitionTo(mOnState);
+                    break;
+        .........
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
+
+### Adapter on
+
+finally Bluetooth enter on state.
+
+{% code-tabs %}
+{% code-tabs-item title="packages/apps/Bluetooth/src/com/android/bluetooth/btservice/AdapterState.java" %}
+```java
+    private class OnState extends BaseAdapterState {
+
+        @Override
+        int getStateValue() {
+            return BluetoothAdapter.STATE_ON;
+        }
+
+        @Override
+        public boolean processMessage(Message msg) {
+            switch (msg.what) {
+                case USER_TURN_OFF:
+                    transitionTo(mTurningOffState);
+                    break;
+
+                default:
+                    infoLog("Unhandled message - " + messageString(msg.what));
+                    return false;
+            }
+            return true;
+        }
+    }
+```
+{% endcode-tabs-item %}
+{% endcode-tabs %}
 
 
 
